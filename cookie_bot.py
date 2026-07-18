@@ -20,9 +20,13 @@ import numpy as np
 
 # --- config ---------------------------------------------------------------
 ADB = os.environ.get("ADB", "adb")  # override with ADB=/path/to/adb if not on PATH
-# Emulators expose ADB on these loopback ports. MuMu: 16384+/7555. Nox: 62001+/52001.
-EMULATOR_PORTS = [16384, 16416, 16448, 16480, 7555,   # MuMu
-                  62001, 62025, 62026, 62027, 62028, 52001]  # Nox
+# Emulators expose ADB on these loopback ports, per program.
+# LDPlayer: 5555 then +2 per extra instance (5557, 5559, ...).
+EMULATOR_PORTS = {
+    "MuMu": [16384, 16416, 16448, 16480, 7555],
+    "Nox": [62001, 62025, 62026, 62027, 62028, 52001],
+    "LDPlayer": [5555, 5557, 5559, 5561, 5563],
+}
 IMAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
 
 CANON = (256, 144)      # everything is downscaled to this before matching
@@ -65,9 +69,12 @@ def _run(args, **kw):
                           creationflags=_NO_WINDOW, **kw)
 
 
-def detect_devices():
-    """Connect to known emulator ports, then return serials adb reports as online."""
-    for port in EMULATOR_PORTS:
+def detect_devices(program=None):
+    """Connect to known emulator ports, then return serials adb reports as online.
+
+    program: an EMULATOR_PORTS key to limit to one program, or None for all."""
+    ports = EMULATOR_PORTS[program] if program else [p for v in EMULATOR_PORTS.values() for p in v]
+    for port in ports:
         try:
             _run(["connect", f"127.0.0.1:{port}"])
         except Exception:
@@ -192,6 +199,9 @@ class App:
 
         top = ttk.Frame(root, padding=8)
         top.pack(fill="x")
+        self.program = tk.StringVar(value="All")
+        ttk.Combobox(top, textvariable=self.program, state="readonly", width=10,
+                     values=["All", *EMULATOR_PORTS]).pack(side="left", padx=(0, 4))
         ttk.Button(top, text="Detect Emulators", command=self.detect).pack(side="left")
         ttk.Button(top, text="Start All", command=self.start_all).pack(side="left", padx=4)
         ttk.Button(top, text="Stop All", command=self.stop_all).pack(side="left")
@@ -242,9 +252,11 @@ class App:
         self.root.after(200, self._drain)
 
     def detect(self):
-        self._log("detecting emulators...")
+        program = self.program.get()
+        program = None if program == "All" else program
+        self._log(f"detecting {program or 'all'} emulators...")
         try:
-            serials = detect_devices()
+            serials = detect_devices(program)
         except FileNotFoundError:
             self._log(f"ERROR: adb not found. Install it or set ADB=/path/to/adb. Tried '{ADB}'.")
             return
